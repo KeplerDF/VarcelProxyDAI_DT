@@ -20,13 +20,20 @@ class handler(BaseHTTPRequestHandler):
 
         try:
             ytt_api = YouTubeTranscriptApi()
+
+            # Fetch all available transcript tracks for the video
             transcript_list = ytt_api.list(video_id)
 
+            # 1. Try manual English tracks first, then auto-generated English
             try:
-                transcript = transcript_list.find_transcript(['en', 'en-US'])
+                transcript = transcript_list.find_transcript(['en', 'en-US', 'en-GB', 'en-orig'])
             except NoTranscriptFound:
-                first_available = next(iter(transcript_list))
-                transcript = first_available.translate('en')
+                # 2. Try any generated track, or translate the first available track to English
+                try:
+                    transcript = transcript_list.find_generated_transcript(['en'])
+                except NoTranscriptFound:
+                    first_available = next(iter(transcript_list))
+                    transcript = first_available.translate('en')
 
             entries = transcript.fetch()
 
@@ -40,7 +47,7 @@ class handler(BaseHTTPRequestHandler):
 
             self.wfile.write(json.dumps({"success": True, "entries": formatted_entries}).encode())
 
-        except (TranscriptsDisabled, NoTranscriptFound):
-            self.wfile.write(json.dumps({"error": "No transcripts found", "entries": []}).encode())
+        except (TranscriptsDisabled, NoTranscriptFound) as e:
+            self.wfile.write(json.dumps({"error": str(e), "entries": []}).encode())
         except Exception as e:
             self.wfile.write(json.dumps({"error": str(e), "entries": []}).encode())
