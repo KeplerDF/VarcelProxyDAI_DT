@@ -10,44 +10,41 @@ class handler(BaseHTTPRequestHandler):
         query_params = parse_qs(parsed_path.query)
         video_id = query_params.get('video_id', [None])[0]
 
-        self.send_response(200 if video_id else 400)
-        self.send_header('Content-Type', 'application/json')
-        self.end_headers()
-
         if not video_id:
+            self.send_response(400)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
             self.wfile.write(json.dumps({"error": "Missing video_id parameter"}).encode())
             return
 
         try:
-            ytt_api = YouTubeTranscriptApi()
+            # Initialize API instance for modern youtube-transcript-api versions
+            ytt = YouTubeTranscriptApi()
 
-            # Fetch all available transcript tracks for the video
-            transcript_list = ytt_api.list(video_id)
+            # Fetch transcript using instance method with language preferences
+            transcript_data = ytt.fetch(video_id, languages=['en', 'en-US', 'en-GB', 'en-orig'])
 
-            # 1. Try manual English tracks first, then auto-generated English
-            try:
-                transcript = transcript_list.find_transcript(['en', 'en-US', 'en-GB', 'en-orig'])
-            except NoTranscriptFound:
-                # 2. Try any generated track, or translate the first available track to English
-                try:
-                    transcript = transcript_list.find_generated_transcript(['en'])
-                except NoTranscriptFound:
-                    first_available = next(iter(transcript_list))
-                    transcript = first_available.translate('en')
-
-            entries = transcript.fetch()
-
-            formatted_entries = []
-            for item in entries:
-                formatted_entries.append({
+            # Convert Transcript objects to plain dictionaries
+            entries = []
+            for item in transcript_data:
+                entries.append({
                     "start": item['start'] if isinstance(item, dict) else item.start,
                     "duration": item.get('duration', 0.0) if isinstance(item, dict) else getattr(item, 'duration', 0.0),
                     "text": item['text'] if isinstance(item, dict) else item.text
                 })
 
-            self.wfile.write(json.dumps({"success": True, "entries": formatted_entries}).encode())
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({"success": True, "entries": entries}).encode())
 
-        except (TranscriptsDisabled, NoTranscriptFound) as e:
-            self.wfile.write(json.dumps({"error": str(e), "entries": []}).encode())
         except Exception as e:
-            self.wfile.write(json.dumps({"error": str(e), "entries": []}).encode())
+            # Send explicit error message so Render receives exact failure cause
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                "success": False,
+                "error": str(e),
+                "entries": []
+            }).encode())
